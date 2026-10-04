@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import uuid
@@ -10,7 +11,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.database import (
     check_connection,
@@ -29,6 +30,13 @@ RESULT_CACHE: dict[str, dict[str, Any]] = {}
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# The React dashboard is deployed as a Render static site. The API root
+# redirects there so opening the main Render URL shows the actual frontend.
+DASHBOARD_URL = os.getenv(
+    "DASHBOARD_URL",
+    "https://securemailscope-m6-dashboard.onrender.com",
+).rstrip("/")
 
 app = FastAPI(
     title="SecureMailScope M6 API",
@@ -55,14 +63,14 @@ app.add_middleware(
 )
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def root():
-    return {
-        "project": "SecureMailScope M6",
-        "status": "running",
-        "version": "0.3.0",
-        "pipeline": "M2 -> M3 -> M4 -> M5",
-    }
+    return RedirectResponse(url=DASHBOARD_URL, status_code=307)
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard():
+    return RedirectResponse(url=DASHBOARD_URL, status_code=307)
 
 
 @app.get("/health")
