@@ -19,7 +19,7 @@ def _clean_env_value(value: str | None) -> str | None:
 
     value = value.strip()
 
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"\"", "'"}:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         value = value[1:-1].strip()
 
     return value or None
@@ -112,7 +112,8 @@ def get_analyses_collection():
 def save_analysis(analysis: dict) -> bool:
     """
     Cache the complete result immediately, then persist it to MongoDB.
-    Returns True only when MongoDB persistence succeeds.
+    The MongoDB document is written with mongodb_saved=True only after
+    the persistence operation itself is known to have succeeded.
     """
 
     analysis_id = analysis.get("analysis_id")
@@ -129,11 +130,19 @@ def save_analysis(analysis: dict) -> bool:
         return False
 
     try:
+        document = dict(analysis)
+        document["mongodb_saved"] = True
+
         collection.replace_one(
             {"analysis_id": analysis_id},
-            analysis,
+            document,
             upsert=True,
         )
+
+        analysis["mongodb_saved"] = True
+        if analysis_id:
+            _memory_analyses[analysis_id] = analysis
+
         logger.info("Analysis %s saved to MongoDB", analysis_id)
         return True
 
