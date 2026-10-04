@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: securemailscope-m6-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DATABASE
+        value: securemailscope
+
+  - type: web
+    name: securemailscope-m6-dashboard
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://securemailscope-m6-2.onrender.com
