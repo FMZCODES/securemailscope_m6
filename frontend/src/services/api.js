@@ -1,4 +1,7 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  "https://securemailscope-m6-2.onrender.com"
+).replace(/\/$/, "");
 
 async function parseResponse(response) {
   const text = await response.text();
@@ -38,12 +41,22 @@ export async function uploadPcap(file) {
 }
 
 export async function getResults(analysisId) {
+  if (!analysisId) {
+    throw new Error("Analysis ID is required.");
+  }
+
   const response = await fetch(`${API_BASE_URL}/results/${analysisId}`);
   return parseResponse(response);
 }
 
 export async function getReportJson(analysisId) {
-  const response = await fetch(`${API_BASE_URL}/report/${analysisId}/json`);
+  if (!analysisId) {
+    throw new Error("Analysis ID is required.");
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/report/${analysisId}/json`
+  );
   return parseResponse(response);
 }
 
@@ -55,3 +68,5 @@ export async function checkHealth() {
   const response = await fetch(`${API_BASE_URL}/health`);
   return parseResponse(response);
 }
+
+export { API_BASE_URL };
