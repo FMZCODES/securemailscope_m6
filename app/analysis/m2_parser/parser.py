@@ -17,13 +17,13 @@ This module does NOT perform:
 """
 
 from __future__ import annotations
-import asyncio
+
 import asyncio
 import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import pyshark
 
@@ -71,10 +71,7 @@ def _find_tshark() -> str:
         3. Standard Windows Wireshark locations
     """
 
-    # --------------------------------------------------------
     # 1. Environment variable
-    # --------------------------------------------------------
-
     env_path = os.environ.get("TSHARK_PATH")
 
     if env_path:
@@ -84,39 +81,25 @@ def _find_tshark() -> str:
         if Path(env_path).is_file():
             return env_path
 
-
-    # --------------------------------------------------------
     # 2. PATH
-    # --------------------------------------------------------
-
     path = shutil.which("tshark")
 
     if path:
         return path
 
-
-    # --------------------------------------------------------
     # 3. Standard Windows locations
-    # --------------------------------------------------------
-
     possible_paths = [
         r"C:\Program Files\Wireshark\tshark.exe",
         r"C:\Program Files (x86)\Wireshark\tshark.exe",
     ]
 
     for candidate in possible_paths:
-
         if Path(candidate).is_file():
             return candidate
 
-
-    # --------------------------------------------------------
-    # Not found
-    # --------------------------------------------------------
-
     raise RuntimeError(
-        "TShark was not found. Install Wireshark/TShark or set "
-        "the TSHARK_PATH environment variable."
+        "TShark was not found. "
+        "Install Wireshark/TShark or set the TSHARK_PATH environment variable."
     )
 
 
@@ -124,21 +107,19 @@ def _find_tshark() -> str:
 # Python 3.14 / PyShark event-loop compatibility
 # ============================================================
 
-def _ensure_event_loop() -> asyncio.AbstractEventLoop:
+def _create_event_loop() -> asyncio.AbstractEventLoop:
     """
-    PyShark versions commonly used with this project expect
-    a current asyncio event loop.
+    Create a dedicated asyncio event loop for PyShark.
 
-    Python 3.14 no longer automatically creates one in some
-    situations, so create one explicitly.
+    Python 3.14 no longer guarantees that an event loop exists
+    when asyncio.get_event_loop() is called.
+
+    PyShark requires an event loop, so we explicitly create one
+    and pass it directly to FileCapture.
     """
 
-    try:
-        loop = asyncio.get_event_loop()
-
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     return loop
 
@@ -149,9 +130,7 @@ def _ensure_event_loop() -> asyncio.AbstractEventLoop:
 
 def _safe_str(value) -> str:
     """
-    Convert PyShark fields safely to strings.
-
-    PyShark fields are not always normal Python strings.
+    Safely convert a value to string.
     """
 
     if value is None:
@@ -164,9 +143,12 @@ def _safe_str(value) -> str:
         return ""
 
 
-def _safe_int(value, default=0) -> int:
+def _safe_int(
+    value,
+    default: Optional[int] = 0,
+) -> Optional[int]:
     """
-    Convert a PyShark field to int safely.
+    Safely convert a value to int.
     """
 
     if value is None:
@@ -183,27 +165,22 @@ def _safe_int(value, default=0) -> int:
 
 
 # ============================================================
-# Packet field extraction
+# IP address extraction
 # ============================================================
 
-def _get_ip_addresses(packet):
+def _get_ip_addresses(packet) -> Tuple[str, str]:
     """
     Extract source and destination IP addresses.
 
-    Supports both IPv4 and IPv6.
+    Supports IPv4 and IPv6.
     """
 
     src_ip = ""
     dst_ip = ""
 
-    # --------------------------------------------------------
     # IPv4
-    # --------------------------------------------------------
-
     try:
-
         if hasattr(packet, "ip"):
-
             src_ip = _safe_str(
                 getattr(packet.ip, "src", "")
             )
@@ -215,17 +192,10 @@ def _get_ip_addresses(packet):
     except Exception:
         pass
 
-
-    # --------------------------------------------------------
     # IPv6
-    # --------------------------------------------------------
-
     if not src_ip and not dst_ip:
-
         try:
-
             if hasattr(packet, "ipv6"):
-
                 src_ip = _safe_str(
                     getattr(packet.ipv6, "src", "")
                 )
@@ -237,29 +207,26 @@ def _get_ip_addresses(packet):
         except Exception:
             pass
 
-
     return src_ip, dst_ip
 
 
 # ============================================================
+# Port extraction
+# ============================================================
 
-def _get_ports(packet):
+def _get_ports(
+    packet,
+) -> Tuple[Optional[int], Optional[int]]:
     """
-    Extract source and destination TCP/UDP ports.
+    Extract TCP/UDP source and destination ports.
     """
 
     src_port = None
     dst_port = None
 
-
-    # --------------------------------------------------------
     # TCP
-    # --------------------------------------------------------
-
     try:
-
         if hasattr(packet, "tcp"):
-
             src_port = _safe_int(
                 getattr(packet.tcp, "srcport", None),
                 None,
@@ -275,15 +242,9 @@ def _get_ports(packet):
     except Exception:
         pass
 
-
-    # --------------------------------------------------------
     # UDP
-    # --------------------------------------------------------
-
     try:
-
         if hasattr(packet, "udp"):
-
             src_port = _safe_int(
                 getattr(packet.udp, "srcport", None),
                 None,
@@ -299,47 +260,44 @@ def _get_ports(packet):
     except Exception:
         pass
 
-
     return src_port, dst_port
 
 
 # ============================================================
+# Transport protocol
+# ============================================================
 
 def _get_transport_protocol(packet) -> str:
     """
-    Identify TCP/UDP/other transport protocol.
+    Identify TCP, UDP, SCTP or UNKNOWN.
     """
 
     try:
-
         if hasattr(packet, "tcp"):
             return "TCP"
 
     except Exception:
         pass
 
-
     try:
-
         if hasattr(packet, "udp"):
             return "UDP"
 
     except Exception:
         pass
 
-
     try:
-
         if hasattr(packet, "sctp"):
             return "SCTP"
 
     except Exception:
         pass
 
-
     return "UNKNOWN"
 
 
+# ============================================================
+# Timestamp
 # ============================================================
 
 def _get_packet_timestamp(packet) -> str:
@@ -348,7 +306,6 @@ def _get_packet_timestamp(packet) -> str:
     """
 
     try:
-
         timestamp = getattr(
             packet,
             "sniff_time",
@@ -361,19 +318,22 @@ def _get_packet_timestamp(packet) -> str:
     except Exception:
         pass
 
-
     return ""
 
 
 # ============================================================
+# Packet number
+# ============================================================
 
-def _get_packet_number(packet, fallback: int) -> int:
+def _get_packet_number(
+    packet,
+    fallback: int,
+) -> int:
     """
     Extract packet number safely.
     """
 
     try:
-
         number = getattr(
             packet,
             "number",
@@ -386,32 +346,70 @@ def _get_packet_number(packet, fallback: int) -> int:
     except Exception:
         pass
 
-
     return fallback
+
+
+# ============================================================
+# Packet length
+# ============================================================
+
+def _get_packet_length(
+    packet,
+) -> Optional[int]:
+    """
+    Extract the packet's captured length.
+
+    PyShark normally exposes this through packet.length.
+    """
+
+    try:
+        length = getattr(
+            packet,
+            "length",
+            None,
+        )
+
+        if length is not None:
+            return _safe_int(
+                length,
+                None,
+            )
+
+    except Exception:
+        pass
+
+    # Fallback: inspect frame layer
+    try:
+        if hasattr(packet, "frame"):
+            length = getattr(
+                packet.frame,
+                "len",
+                None,
+            )
+
+            if length is not None:
+                return _safe_int(
+                    length,
+                    None,
+                )
+
+    except Exception:
+        pass
+
+    return None
 
 
 # ============================================================
 # Packet -> PacketRecord
 # ============================================================
 
-def _packet_to_record(packet, packet_number: int) -> PacketRecord:
+def _packet_to_record(
+    packet,
+    packet_number: int,
+) -> PacketRecord:
     """
-    Convert a PyShark packet into the project's PacketRecord.
-
-    IMPORTANT:
-    This matches the actual model fields:
-        src_ip
-        dst_ip
-        src_port
-        dst_port
-
-    There is intentionally NO `length` argument because your
-    PacketRecord model does not define a `length` field.
+    Convert a PyShark packet into PacketRecord.
     """
-
-    # --------------------------------------------------------
-    # Basic packet information
-    # --------------------------------------------------------
 
     actual_packet_number = _get_packet_number(
         packet,
@@ -426,26 +424,15 @@ def _packet_to_record(packet, packet_number: int) -> PacketRecord:
 
     transport_protocol = _get_transport_protocol(packet)
 
-
-    # --------------------------------------------------------
-    # Application protocol
-    # --------------------------------------------------------
-
     application_protocol = identify_application_protocol(
         packet,
         src_port,
         dst_port,
     )
 
+    packet_length = _get_packet_length(packet)
 
-    # --------------------------------------------------------
-    # Create PacketRecord
-    # --------------------------------------------------------
-
-    def _get_packet_length(packet):
-        ...
-
-    record = PacketRecord(
+    return PacketRecord(
         packet_number=actual_packet_number,
         timestamp=timestamp,
         src_ip=src_ip,
@@ -454,10 +441,8 @@ def _packet_to_record(packet, packet_number: int) -> PacketRecord:
         dst_port=dst_port,
         transport_protocol=transport_protocol,
         application_protocol=application_protocol,
-        packet_length=_get_packet_length(packet),
-)
-
-    return record
+        packet_length=packet_length,
+    )
 
 
 # ============================================================
@@ -470,14 +455,13 @@ def _build_summary(
     skipped_packets: int,
 ) -> ProtocolSummary:
     """
-    Build ProtocolSummary from successfully parsed packets.
+    Build ProtocolSummary from parsed packets.
     """
 
     smtp_packets = 0
     imap_packets = 0
     pop3_packets = 0
     unknown_packets = 0
-
 
     for packet in packets:
 
@@ -489,35 +473,23 @@ def _build_summary(
             )
         ).upper()
 
-
         if protocol == "SMTP":
-
             smtp_packets += 1
-
 
         elif protocol in {
             "IMAP",
             "IMAPS",
         }:
-
             imap_packets += 1
-
 
         elif protocol in {
             "POP3",
             "POP3S",
         }:
-
             pop3_packets += 1
 
-
-        elif protocol in {
-            "",
-            "UNKNOWN",
-        }:
-
+        else:
             unknown_packets += 1
-
 
     return ProtocolSummary(
         total_packets=total_packets,
@@ -537,109 +509,88 @@ def parse_pcap(
     file_path: str,
 ) -> Tuple[List[PacketRecord], ProtocolSummary]:
     """
-    Parse a PCAP/PCAPNG file.
+    Parse a PCAP/PCAPNG/CAP file.
 
-    Parameters
-    ----------
-    file_path:
-        Path to .pcap, .pcapng, or .cap file.
-
-    Returns
-    -------
-    packets:
-        List of PacketRecord objects.
-
-    summary:
-        ProtocolSummary object.
-
-    Raises
-    ------
-    InvalidPcapFileError
-        If the file does not exist, has an unsupported extension,
-        TShark cannot be found, or PyShark cannot open the PCAP.
+    Returns:
+        packets, summary
     """
 
     # --------------------------------------------------------
     # Resolve path
     # --------------------------------------------------------
 
-    path = Path(file_path).expanduser().resolve()
-
+    path = Path(
+        file_path
+    ).expanduser().resolve()
 
     # --------------------------------------------------------
-    # Check file
+    # Validate file
     # --------------------------------------------------------
 
     if not path.exists():
-
         raise InvalidPcapFileError(
             f"PCAP file does not exist: {path}"
         )
 
-
     if not path.is_file():
-
         raise InvalidPcapFileError(
             f"PCAP path is not a file: {path}"
         )
 
-
     if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-
         raise InvalidPcapFileError(
             "Unsupported PCAP file extension. "
             "Use .pcap, .pcapng, or .cap."
         )
-
 
     # --------------------------------------------------------
     # Find TShark
     # --------------------------------------------------------
 
     try:
-
         tshark_path = _find_tshark()
 
     except Exception as exc:
-
         raise InvalidPcapFileError(
             str(exc)
         ) from exc
-
 
     logger.info(
         "Using TShark: %s",
         tshark_path,
     )
 
+    # --------------------------------------------------------
+    # Create dedicated event loop
+    # --------------------------------------------------------
+
+    event_loop = _create_event_loop()
+
+    capture = None
 
     # --------------------------------------------------------
-    # Fix Python 3.14 / PyShark event loop
-    # --------------------------------------------------------
-
-    _ensure_event_loop()
-
-
-    # --------------------------------------------------------
-    # Open PCAP
+    # Open PCAP with PyShark
     # --------------------------------------------------------
 
     try:
-        try:
-            asyncio.get_event_loop()
-        except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
 
         capture = pyshark.FileCapture(
-            str(path),
+            input_file=str(path),
             keep_packets=False,
             tshark_path=tshark_path,
+            eventloop=event_loop,
         )
+
     except Exception as exc:
+
+        try:
+            event_loop.close()
+        except Exception:
+            pass
+
         raise InvalidPcapFileError(
             f"TShark could not open '{path}': {exc}"
         ) from exc
-
 
     # --------------------------------------------------------
     # Parse packets
@@ -651,13 +602,11 @@ def parse_pcap(
 
     skipped_packets = 0
 
-
     try:
 
         for packet in capture:
 
             total_packets += 1
-
 
             try:
 
@@ -667,7 +616,6 @@ def parse_pcap(
                 )
 
                 packets.append(record)
-
 
             except Exception as exc:
 
@@ -679,22 +627,45 @@ def parse_pcap(
                     exc,
                 )
 
-
     except Exception as exc:
 
         raise InvalidPcapFileError(
             f"Error while reading PCAP '{path}': {exc}"
         ) from exc
 
-
     finally:
 
+        # ----------------------------------------------------
+        # Close PyShark capture
+        # ----------------------------------------------------
+
+        if capture is not None:
+
+            try:
+                capture.close()
+
+            except Exception:
+                pass
+
+        # ----------------------------------------------------
+        # Close dedicated event loop
+        # ----------------------------------------------------
+
         try:
-            capture.close()
+            event_loop.close()
 
         except Exception:
             pass
 
+        # ----------------------------------------------------
+        # Remove closed loop from current asyncio context
+        # ----------------------------------------------------
+
+        try:
+            asyncio.set_event_loop(None)
+
+        except Exception:
+            pass
 
     # --------------------------------------------------------
     # Build summary
@@ -705,7 +676,6 @@ def parse_pcap(
         total_packets=total_packets,
         skipped_packets=skipped_packets,
     )
-
 
     # --------------------------------------------------------
     # Logging
@@ -730,18 +700,16 @@ def parse_pcap(
         skipped_packets,
     )
 
-
     return packets, summary
 
 
 # ============================================================
-# Optional command-line test
+# Command-line test
 # ============================================================
 
 if __name__ == "__main__":
 
     import sys
-
 
     if len(sys.argv) != 2:
 
@@ -756,16 +724,13 @@ if __name__ == "__main__":
 
         raise SystemExit(1)
 
-
     pcap_file = sys.argv[1]
-
 
     try:
 
         parsed_packets, parsed_summary = parse_pcap(
             pcap_file
         )
-
 
         print()
         print("========================================")
@@ -785,11 +750,8 @@ if __name__ == "__main__":
 
         print()
 
-
         for packet in parsed_packets[:10]:
-
             print(packet)
-
 
     except Exception as exc:
 
