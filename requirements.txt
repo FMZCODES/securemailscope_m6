@@ -1,7 +1,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
-pymongo
+pymongo>=4.10,<5
 python-dotenv
+certifi>=2024.8.30
 pyshark
 scapy
