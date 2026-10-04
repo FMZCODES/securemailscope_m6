@@ -9,22 +9,23 @@ export default function Dashboard({ data }) {
   const m4 = data?.m4 || {};
   const m5 = data?.m5 || {};
 
-  const m3Streams = Array.isArray(m3.results) ? m3.results : [];
-  const m4Streams = Array.isArray(m4.results) ? m4.results : [];
-  const m5Streams = Array.isArray(m5.results) ? m5.results : [];
+  const m3Streams = getResultsArray(m3);
+  const m4Streams = getResultsArray(m4);
+  const m5Streams = getResultsArray(m5);
 
   const riskScores = m5Streams
-    .map((stream) => Number(stream?.risk?.score))
-    .filter(Number.isFinite);
+    .map((stream) => numberOrNull(stream?.risk?.score))
+    .filter((value) => value !== null);
 
   const overallRisk = riskScores.length ? Math.max(...riskScores) : null;
-  const securityScore = overallRisk === null ? null : 100 - overallRisk;
+  const securityScore = overallRisk === null ? null : clamp(100 - overallRisk, 0, 100);
 
   const protocols = unique(
-    m3Streams.map((stream) => stream?.protocol).filter(Boolean)
+    [
+      ...m3Streams.map((stream) => stream?.protocol),
+      ...protocolsFromM2(m2Summary),
+    ].filter(Boolean)
   );
-
-  const findings = buildFindings(m4Streams, m5Streams);
 
   const tlsVersions = unique(
     m4Streams.map((stream) => stream?.tls?.tls_version).filter(Boolean)
@@ -49,6 +50,15 @@ export default function Dashboard({ data }) {
     (stream) => stream?.starttls_detected === true
   ).length;
 
+  const totalStreams = Math.max(
+    m4Streams.length,
+    m3Streams.length,
+    Number(m4.streams_analyzed) || 0,
+    Number(m3.streams_analyzed) || 0
+  );
+
+  const findings = buildFindings(m4Streams, m5Streams);
+
   return (
     <section className="dashboard">
       <div className="section-heading">
@@ -59,22 +69,19 @@ export default function Dashboard({ data }) {
             Complete M2 → M3 → M4 → M5 analysis for {data?.filename || "uploaded PCAP"}.
           </p>
         </div>
-
-        <span className="status-pill">
-          {data?.status || "Analysis complete"}
-        </span>
+        <span className="status-pill">{data?.status || "completed"}</span>
       </div>
 
       <div className="dashboard-grid">
         <SecurityScore
           score={securityScore}
           riskScore={overallRisk}
-          streams={m5Streams.length}
+          streams={m5Streams.length || Number(m5.streams_analyzed) || totalStreams}
         />
         <ProtocolSummary
           protocols={protocols}
           starttlsCount={starttlsCount}
-          totalStreams={m4Streams.length || m3Streams.length}
+          totalStreams={totalStreams}
           tlsVersions={tlsVersions}
           cipherSuites={cipherSuites}
           keyExchanges={keyExchanges}
@@ -83,10 +90,7 @@ export default function Dashboard({ data }) {
       </div>
 
       <div className="assessment-grid">
-        <ModuleCard
-          title="M2 — PCAP Analysis"
-          subtitle="Packet and protocol summary"
-        >
+        <ModuleCard title="M2 — PCAP Analysis" subtitle="Packet and protocol summary">
           <MetricGrid
             items={[
               ["Total packets", m2Summary.total_packets],
@@ -104,34 +108,9 @@ export default function Dashboard({ data }) {
           subtitle={`${m3Streams.length || m3.streams_analyzed || 0} stream(s) analyzed`}
         >
           {m3Streams.length ? (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Protocol</th>
-                    <th>Source</th>
-                    <th>Destination</th>
-                    <th>Packets</th>
-                    <th>STARTTLS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {m3Streams.map((stream, index) => (
-                    <tr key={stream.stream_id || index}>
-                      <td>{stream.protocol || "TCP"}</td>
-                      <td>{formatEndpoint(stream.source_ip, stream.source_port)}</td>
-                      <td>{formatEndpoint(stream.destination_ip, stream.destination_port)}</td>
-                      <td>{valueOrDash(stream.packet_count)}</td>
-                      <td>{formatBool(stream.starttls_detected)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <StreamTable streams={m3Streams} />
           ) : (
-            <div className="empty-state">
-              M3 stream details are not present in this response.
-            </div>
+            <div className="empty-state">M3 stream details are not present in this response.</div>
           )}
         </ModuleCard>
       </div>
@@ -147,6 +126,7 @@ export default function Dashboard({ data }) {
                 <tr>
                   <th>Protocol</th>
                   <th>STARTTLS</th>
+                  <th>TLS observed</th>
                   <th>TLS version</th>
                   <th>Cipher suite</th>
                   <th>Key exchange</th>
@@ -155,17 +135,23 @@ export default function Dashboard({ data }) {
                 </tr>
               </thead>
               <tbody>
-                {m4Streams.map((stream, index) => (
-                  <tr key={stream.stream_id || index}>
-                    <td>{stream.protocol || "—"}</td>
-                    <td>{formatBool(stream.starttls_detected)}</td>
-                    <td>{stream.tls?.tls_version || "—"}</td>
-                    <td>{stream.tls?.cipher_suite || "—"}</td>
-                    <td>{stream.tls?.key_exchange || "—"}</td>
-                    <td>{formatBool(stream.tls?.forward_secrecy)}</td>
-                    <td>{formatBool(stream.certificate?.observed)}</td>
-                  </tr>
-                ))}
+                {m4Streams.map((stream, index) => {
+                  const tls = stream?.tls || {};
+                  const certificate = stream?.certificate || {};
+
+                  return (
+                    <tr key={stream.stream_id || index}>
+                      <td>{stream.protocol || "—"}</td>
+                      <td>{formatBool(stream.starttls_detected)}</td>
+                      <td>{formatBool(tls.observed)}</td>
+                      <td>{valueOrNotObserved(tls.tls_version)}</td>
+                      <td>{valueOrNotObserved(tls.cipher_suite)}</td>
+                      <td>{valueOrNotObserved(tls.key_exchange)}</td>
+                      <td>{formatBool(tls.forward_secrecy)}</td>
+                      <td>{formatBool(certificate.observed)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -187,27 +173,30 @@ export default function Dashboard({ data }) {
                   <th>Risk score</th>
                   <th>Risk level</th>
                   <th>ML model</th>
+                  <th>Features</th>
                   <th>Findings</th>
                 </tr>
               </thead>
               <tbody>
                 {m5Streams.map((stream, index) => {
-                  const risk = stream.risk || {};
-                  const streamFindings = [
-                    ...(Array.isArray(stream.findings) ? stream.findings : []),
-                    ...(Array.isArray(risk.findings) ? risk.findings : []),
-                  ];
+                  const risk = stream?.risk || {};
+                  const streamFindings = collectStreamFindings(stream);
+                  const featureCount =
+                    stream?.features && typeof stream.features === "object"
+                      ? Object.keys(stream.features).length
+                      : 0;
 
                   return (
                     <tr key={stream.stream_id || index}>
                       <td>{stream.protocol || "—"}</td>
-                      <td><strong>{valueOrDash(risk.score)}</strong>/100</td>
+                      <td>{valueOrDash(risk.score)}{risk.score !== undefined && risk.score !== null ? "/100" : ""}</td>
                       <td>
                         <span className={`severity ${String(risk.risk_level || "INFO").toLowerCase()}`}>
                           {risk.risk_level || "—"}
                         </span>
                       </td>
                       <td>{stream.ml_model_status || "—"}</td>
+                      <td>{featureCount}</td>
                       <td>{streamFindings.length}</td>
                     </tr>
                   );
@@ -229,7 +218,7 @@ export default function Dashboard({ data }) {
             ["Filename", data?.filename],
             ["Pipeline", data?.pipeline],
             ["Status", data?.status],
-            ["MongoDB saved", formatBool(data?.mongodb_saved)],
+            ["MongoDB saved", data?.mongodb_saved === true ? "Yes" : "No — using API cache"],
             ["Created at", data?.created_at],
           ]}
         />
@@ -241,6 +230,35 @@ export default function Dashboard({ data }) {
         <pre>{JSON.stringify(data, null, 2)}</pre>
       </details>
     </section>
+  );
+}
+
+function StreamTable({ streams }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Protocol</th>
+            <th>Source</th>
+            <th>Destination</th>
+            <th>Packets</th>
+            <th>STARTTLS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {streams.map((stream, index) => (
+            <tr key={stream.stream_id || index}>
+              <td>{stream.protocol || "TCP"}</td>
+              <td>{formatEndpoint(stream.source_ip, stream.source_port)}</td>
+              <td>{formatEndpoint(stream.destination_ip, stream.destination_port)}</td>
+              <td>{valueOrDash(stream.packet_count)}</td>
+              <td>{formatBool(stream.starttls_detected)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -276,27 +294,45 @@ function buildFindings(m4Streams, m5Streams) {
 
   m4Streams.forEach((stream) => {
     (Array.isArray(stream?.findings) ? stream.findings : []).forEach((finding) => {
-      findings.push({ ...finding, stream_id: stream.stream_id, source: "M4" });
+      findings.push({ ...finding, stream_id: stream.stream_id, source: finding.source || "M4" });
     });
   });
 
   m5Streams.forEach((stream) => {
-    const riskFindings = Array.isArray(stream?.risk?.findings)
-      ? stream.risk.findings
-      : [];
-
-    riskFindings.forEach((finding) => {
-      findings.push({ ...finding, stream_id: stream.stream_id, source: "M5" });
+    collectStreamFindings(stream).forEach((finding) => {
+      findings.push({ ...finding, stream_id: stream.stream_id, source: finding.source || "M5" });
     });
   });
 
   const seen = new Set();
   return findings.filter((finding) => {
-    const key = `${finding.stream_id}|${finding.type}|${finding.message}`;
+    const key = `${finding.stream_id}|${finding.type}|${finding.message || finding.description}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+function collectStreamFindings(stream) {
+  return [
+    ...(Array.isArray(stream?.findings) ? stream.findings : []),
+    ...(Array.isArray(stream?.risk?.findings) ? stream.risk.findings : []),
+  ];
+}
+
+function getResultsArray(module) {
+  if (Array.isArray(module?.results)) return module.results;
+  if (Array.isArray(module?.streams)) return module.streams;
+  if (Array.isArray(module?.data)) return module.data;
+  return [];
+}
+
+function protocolsFromM2(summary) {
+  const protocols = [];
+  if (Number(summary?.smtp_packets) > 0) protocols.push("SMTP");
+  if (Number(summary?.imap_packets) > 0) protocols.push("IMAP");
+  if (Number(summary?.pop3_packets) > 0) protocols.push("POP3");
+  return protocols;
 }
 
 function unique(values) {
@@ -307,13 +343,28 @@ function valueOrDash(value) {
   return value === undefined || value === null || value === "" ? "—" : value;
 }
 
+function valueOrNotObserved(value) {
+  return value === undefined || value === null || value === ""
+    ? "Not observed"
+    : value;
+}
+
 function formatBool(value) {
   if (value === true) return "Enabled";
   if (value === false) return "Disabled";
-  return "—";
+  return "Not observed";
 }
 
 function formatEndpoint(ip, port) {
   if (!ip && !port) return "—";
   return `${ip || "?"}:${port || "?"}`;
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
