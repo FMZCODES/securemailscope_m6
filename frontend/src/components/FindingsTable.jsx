@@ -10,15 +10,17 @@ export default function FindingsTable({ findings }) {
 
       {findings.length === 0 ? (
         <div className="empty-state">
-          No security findings reported.
+          No security findings were returned by M4/M5.
         </div>
       ) : (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
+                <th>Source</th>
                 <th>Severity</th>
                 <th>Type</th>
+                <th>Stream</th>
                 <th>Message</th>
                 <th>Recommendation</th>
               </tr>
@@ -26,7 +28,8 @@ export default function FindingsTable({ findings }) {
 
             <tbody>
               {findings.map((finding, index) => (
-                <tr key={finding.id || index}>
+                <tr key={`${finding.stream_id || "stream"}-${finding.type || "finding"}-${index}`}>
+                  <td>{finding.source || "—"}</td>
                   <td>
                     <span
                       className={`severity ${String(
@@ -36,17 +39,9 @@ export default function FindingsTable({ findings }) {
                       {finding.severity || "INFO"}
                     </span>
                   </td>
-
-                  <td>
-                    {finding.type || "—"}
-                  </td>
-
-                  <td>
-                    {finding.message ||
-                      finding.description ||
-                      "—"}
-                  </td>
-
+                  <td>{finding.type || "—"}</td>
+                  <td>{finding.stream_id || "—"}</td>
+                  <td>{finding.message || finding.description || "—"}</td>
                   <td>
                     {finding.recommendation ||
                       "Review the finding and apply the appropriate security configuration."}
