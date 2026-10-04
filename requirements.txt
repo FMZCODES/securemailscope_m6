@@ -3,4 +3,4 @@ uvicorn[standard]
 python-multipart
 pymongo
 python-dotenv
-pyshark
+pysharkscapy
