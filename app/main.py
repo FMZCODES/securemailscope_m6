@@ -66,7 +66,21 @@ app = FastAPI(
         "M5 AI/ML risk analysis."
     ),
 )
+@app.get("/")
+def root():
+    return {
+        "project": "SecureMailScope M6",
+        "status": "running",
+        "version": "0.2.0",
+        "pipeline": "M2 → M3 → M4 → M5"
+    }
 
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy"
+    }
 
 # ============================================================
 # CORS
@@ -77,6 +91,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+         "https://securemailscope-m6-4.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
