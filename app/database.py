@@ -19,7 +19,6 @@ def _clean_env_value(value: str | None) -> str | None:
 
     value = value.strip()
 
-    # Remove accidental surrounding quotes.
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"\"", "'"}:
         value = value[1:-1].strip()
 
@@ -27,14 +26,9 @@ def _clean_env_value(value: str | None) -> str | None:
 
 
 MONGODB_URI = _clean_env_value(os.getenv("MONGODB_URI"))
-MONGODB_DATABASE = _clean_env_value(
-    os.getenv("MONGODB_DATABASE")
-) or "securemailscope"
+MONGODB_DATABASE = _clean_env_value(os.getenv("MONGODB_DATABASE")) or "securemailscope"
 
-# A common Render configuration mistake is pasting the complete .env line
-# into the VALUE field, producing:
-#   MONGODB_URI=mongodb+srv://...
-# Accept that safely instead of sending an invalid URI to PyMongo.
+# Accept an accidental full .env line pasted into the Render VALUE field.
 if MONGODB_URI and MONGODB_URI.startswith("MONGODB_URI="):
     MONGODB_URI = MONGODB_URI.split("=", 1)[1].strip()
 
@@ -42,9 +36,12 @@ client = None
 db = None
 analyses_collection = None
 
+# Keeps the complete result available to the dashboard if MongoDB is
+# temporarily unavailable. MongoDB remains the real persistent store.
+_memory_analyses: dict[str, dict] = {}
+
 
 def _validate_uri(uri: str) -> bool:
-    """Validate the MongoDB URI before creating a client."""
     try:
         parsed = urlparse(uri)
     except Exception:
@@ -54,11 +51,9 @@ def _validate_uri(uri: str) -> bool:
 
 
 def connect_mongodb() -> bool:
-    """Connect to MongoDB Atlas and verify the connection with ping."""
+    """Connect to MongoDB Atlas and force a real ping."""
 
-    global client
-    global db
-    global analyses_collection
+    global client, db, analyses_collection
 
     if not MONGODB_URI:
         logger.error("MONGODB_URI is missing from the environment")
@@ -71,7 +66,6 @@ def connect_mongodb() -> bool:
         return False
 
     try:
-        # certifi gives the Render Linux image an up-to-date CA bundle.
         client = MongoClient(
             MONGODB_URI,
             tls=True,
@@ -83,7 +77,6 @@ def connect_mongodb() -> bool:
             retryWrites=True,
         )
 
-        # Force DNS/TLS/authentication/server selection to happen now.
         client.admin.command("ping")
 
         db = client[MONGODB_DATABASE]
@@ -93,30 +86,21 @@ def connect_mongodb() -> bool:
             "MongoDB connected successfully: database=%s",
             MONGODB_DATABASE,
         )
-
         return True
 
     except Exception as exc:
-        logger.error(
-            "MongoDB connection failed: %s",
-            exc,
-        )
-
+        logger.error("MongoDB connection failed: %s", exc)
         client = None
         db = None
         analyses_collection = None
-
         return False
 
 
 def check_connection() -> bool:
-    """Return True only when MongoDB Atlas is reachable."""
     return connect_mongodb()
 
 
 def get_analyses_collection():
-    """Return the analyses collection, connecting lazily when necessary."""
-
     global analyses_collection
 
     if analyses_collection is None:
@@ -126,25 +110,31 @@ def get_analyses_collection():
 
 
 def save_analysis(analysis: dict) -> bool:
-    """Persist one complete M2-M5 analysis to MongoDB."""
+    """
+    Cache the complete result immediately, then persist it to MongoDB.
+    Returns True only when MongoDB persistence succeeds.
+    """
+
+    analysis_id = analysis.get("analysis_id")
+    if analysis_id:
+        _memory_analyses[analysis_id] = analysis
 
     collection = get_analyses_collection()
 
     if collection is None:
-        logger.warning("MongoDB unavailable. Analysis was not persisted.")
+        logger.warning(
+            "MongoDB unavailable. Analysis %s is available only in memory.",
+            analysis_id,
+        )
         return False
 
     try:
         collection.replace_one(
-            {"analysis_id": analysis.get("analysis_id")},
+            {"analysis_id": analysis_id},
             analysis,
             upsert=True,
         )
-
-        logger.info(
-            "Analysis %s saved to MongoDB",
-            analysis.get("analysis_id"),
-        )
+        logger.info("Analysis %s saved to MongoDB", analysis_id)
         return True
 
     except Exception as exc:
@@ -153,28 +143,29 @@ def save_analysis(analysis: dict) -> bool:
 
 
 def get_analysis(analysis_id: str):
-    """Retrieve a complete analysis by analysis ID."""
+    """Retrieve from MongoDB first, then use the current-process cache."""
 
     collection = get_analyses_collection()
 
-    if collection is None:
-        return None
+    if collection is not None:
+        try:
+            result = collection.find_one(
+                {"analysis_id": analysis_id},
+                {"_id": 0},
+            )
+            if result is not None:
+                _memory_analyses[analysis_id] = result
+                return result
+        except Exception as exc:
+            logger.error("MongoDB read failed: %s", exc)
 
-    try:
-        return collection.find_one(
-            {"analysis_id": analysis_id},
-            {"_id": 0},
-        )
-    except Exception as exc:
-        logger.error("MongoDB read failed: %s", exc)
-        return None
+    return _memory_analyses.get(analysis_id)
 
 
 def delete_analysis(analysis_id: str) -> bool:
-    """Delete an analysis by ID."""
+    _memory_analyses.pop(analysis_id, None)
 
     collection = get_analyses_collection()
-
     if collection is None:
         return False
 
