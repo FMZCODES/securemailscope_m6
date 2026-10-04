@@ -4,17 +4,22 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    autoDeployTrigger: commit
+    healthCheckPath: /health
     envVars:
       - key: MONGODB_URI
         sync: false
       - key: MONGODB_DATABASE
         value: securemailscope
+      - key: DASHBOARD_URL
+        value: https://securemailscope-m6-dashboard.onrender.com
 
   - type: web
     name: securemailscope-m6-dashboard
     runtime: static
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
+    autoDeployTrigger: commit
     envVars:
       - key: VITE_API_BASE_URL
         value: https://securemailscope-m6-2.onrender.com
