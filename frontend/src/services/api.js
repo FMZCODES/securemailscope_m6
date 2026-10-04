@@ -1,4 +1,4 @@
-const API_BASE_URL = "https://securemailscope-m6-3.onrender.com";
+const API_BASE_URL = "";
 
 export async function analyzePcap(file) {
   const formData = new FormData();
