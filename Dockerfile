@@ -6,6 +6,13 @@ RUN apt-get update \
        tshark \
     && rm -rf /var/lib/apt/lists/*
 
+# Explicit TShark path
+ENV TSHARK_PATH=/usr/bin/tshark
+ENV PYTHONUNBUFFERED=1
+
+# Verify TShark is installed during Docker build
+RUN which tshark && tshark --version
+
 WORKDIR /app
 
 # Install Python dependencies
@@ -15,7 +22,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend
 COPY app ./app
 
-# Render provides PORT
-ENV PYTHONUNBUFFERED=1
-
+# Start FastAPI
 CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
