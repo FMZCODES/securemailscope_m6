@@ -36,12 +36,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend
+# Copy backend, including the production entrypoint.
 COPY app ./app
 
 # Copy the production React build.
-# app/main.py serves frontend/dist/index.html at / when present.
 COPY --from=frontend-builder /frontend/dist ./frontend/dist
 
-# Start FastAPI
-CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+# Start the production entrypoint so the React UI is served at /.
+CMD sh -c "uvicorn app.production:app --host 0.0.0.0 --port ${PORT:-8000}"
