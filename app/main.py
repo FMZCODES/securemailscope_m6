@@ -10,7 +10,8 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.database import (
     check_connection,
@@ -44,6 +45,11 @@ UPLOAD_DIR.mkdir(
     parents=True,
     exist_ok=True,
 )
+
+# React production build
+FRONTEND_DIR = BASE_DIR / "frontend" / "dist"
+
+FRONTEND_INDEX = FRONTEND_DIR / "index.html"
 
 
 # ============================================================
@@ -84,6 +90,18 @@ app.add_middleware(
 
 @app.get("/")
 def root():
+    """
+    In production, serve the React frontend.
+
+    If the frontend has not been built yet,
+    return the normal API information.
+    """
+
+    if FRONTEND_INDEX.exists():
+        return FileResponse(
+            FRONTEND_INDEX
+        )
+
     return {
         "project": "SecureMailScope M6",
         "status": "running",
@@ -119,12 +137,15 @@ def health():
 # M2 PARSER
 # ============================================================
 
-def run_m2_parser(pcap_path: Path) -> dict[str, Any]:
+def run_m2_parser(
+    pcap_path: Path,
+) -> dict[str, Any]:
     """
     Run M2 in a completely separate Python process.
 
-    M2 uses PyShark/TShark and previously caused event-loop
-    conflicts when executed directly inside FastAPI/Uvicorn.
+    M2 uses PyShark/TShark and previously caused
+    event-loop conflicts when executed directly inside
+    FastAPI/Uvicorn.
 
     Therefore M2 continues to run using:
 
@@ -197,7 +218,9 @@ def run_m2_parser(pcap_path: Path) -> dict[str, Any]:
 # EXTRACT M2 SUMMARY
 # ============================================================
 
-def extract_m2_summary(output: str) -> dict[str, Any]:
+def extract_m2_summary(
+    output: str,
+) -> dict[str, Any]:
     """
     Extract ProtocolSummary values from M2 output.
     """
@@ -225,7 +248,9 @@ def extract_m2_summary(output: str) -> dict[str, Any]:
                     1,
                 )[1].strip()
 
-                summary["total_packets"] = int(value)
+                summary["total_packets"] = int(
+                    value
+                )
 
             except Exception:
                 pass
@@ -262,12 +287,16 @@ def extract_m2_summary(output: str) -> dict[str, Any]:
 
         marker = field + "="
 
-        position = summary_text.find(marker)
+        position = summary_text.find(
+            marker
+        )
 
         if position == -1:
             continue
 
-        value_start = position + len(marker)
+        value_start = (
+            position + len(marker)
+        )
 
         value_end = summary_text.find(
             ",",
@@ -288,7 +317,9 @@ def extract_m2_summary(output: str) -> dict[str, Any]:
         ].strip()
 
         try:
-            summary[field] = int(value)
+            summary[field] = int(
+                value
+            )
 
         except ValueError:
             pass
@@ -313,7 +344,8 @@ def run_m3_m4_m5(
         TLS and certificate analysis.
 
     M5:
-        Feature extraction, ML prediction and risk engine.
+        Feature extraction, ML prediction
+        and risk engine.
     """
 
     logger.info(
@@ -345,10 +377,11 @@ def run_m3_m4_m5(
 
 
 # ============================================================
-# UPLOAD PCAP
+# UPLOAD / ANALYZE PCAP
 # ============================================================
 
 @app.post("/upload-pcap")
+@app.post("/analyze")
 async def upload_pcap(
     file: UploadFile = File(...),
 ):
@@ -357,10 +390,13 @@ async def upload_pcap(
 
         M2 -> M3 -> M4 -> M5
 
-    MongoDB is optional.
+    Both endpoints are supported:
 
-    If MongoDB is unavailable:
-        PCAP analysis still succeeds.
+        POST /upload-pcap
+        POST /analyze
+
+    This allows the existing React frontend to call
+    /analyze without requiring frontend changes.
     """
 
     # --------------------------------------------------------
@@ -424,7 +460,9 @@ async def upload_pcap(
 
     try:
 
-        with pcap_path.open("wb") as destination:
+        with pcap_path.open(
+            "wb"
+        ) as destination:
 
             while True:
 
@@ -445,7 +483,9 @@ async def upload_pcap(
 
         raise HTTPException(
             status_code=500,
-            detail=f"PCAP upload failed: {exc}",
+            detail=(
+                f"PCAP upload failed: {exc}"
+            ),
         )
 
     finally:
@@ -475,7 +515,9 @@ async def upload_pcap(
 
         raise HTTPException(
             status_code=500,
-            detail=f"M2 PCAP analysis failed: {exc}",
+            detail=(
+                f"M2 PCAP analysis failed: {exc}"
+            ),
         )
 
     # --------------------------------------------------------
@@ -542,17 +584,27 @@ async def upload_pcap(
 
         "m2": {
             "module": "M2",
+
             "summary": m2_summary,
+
             "parser": {
-                "exit_code": parser_result[
-                    "exit_code"
-                ],
-                "stdout": parser_result[
-                    "stdout"
-                ],
-                "stderr": parser_result[
-                    "stderr"
-                ],
+                "exit_code": (
+                    parser_result[
+                        "exit_code"
+                    ]
+                ),
+
+                "stdout": (
+                    parser_result[
+                        "stdout"
+                    ]
+                ),
+
+                "stderr": (
+                    parser_result[
+                        "stderr"
+                    ]
+                ),
             },
         },
 
@@ -596,7 +648,7 @@ async def upload_pcap(
             analysis
         )
 
-    except Exception as exc:
+    except Exception:
 
         logger.exception(
             "Unexpected MongoDB error."
@@ -631,7 +683,10 @@ async def upload_pcap(
             "streams_analyzed": (
                 pipeline_result
                 .get("m3", {})
-                .get("streams_analyzed", 0)
+                .get(
+                    "streams_analyzed",
+                    0,
+                )
             ),
         },
 
@@ -639,7 +694,10 @@ async def upload_pcap(
             "streams_analyzed": (
                 pipeline_result
                 .get("m4", {})
-                .get("streams_analyzed", 0)
+                .get(
+                    "streams_analyzed",
+                    0,
+                )
             ),
         },
 
@@ -647,7 +705,10 @@ async def upload_pcap(
             "streams_analyzed": (
                 pipeline_result
                 .get("m5", {})
-                .get("streams_analyzed", 0)
+                .get(
+                    "streams_analyzed",
+                    0,
+                )
             ),
         },
 
@@ -671,7 +732,8 @@ def get_results(
     analysis_id: str,
 ):
     """
-    Retrieve a complete M2-M5 analysis from MongoDB.
+    Retrieve a complete M2-M5 analysis
+    from MongoDB.
     """
 
     analysis = get_analysis(
@@ -954,4 +1016,22 @@ M5 Output
 
     return HTMLResponse(
         content=html
+    )
+
+
+# ============================================================
+# SERVE REACT FRONTEND
+# ============================================================
+
+if FRONTEND_DIR.exists():
+
+    app.mount(
+        "/",
+        StaticFiles(
+            directory=str(
+                FRONTEND_DIR
+            ),
+            html=True,
+        ),
+        name="frontend",
     )
