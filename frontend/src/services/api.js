@@ -1,12 +1,11 @@
 const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  "https://securemailscope-m6-2.onrender.com"
+  import.meta.env.VITE_API_BASE_URL || ""
 ).replace(/\/$/, "");
 
 async function parseResponse(response) {
   const text = await response.text();
-
   let data = {};
+
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
