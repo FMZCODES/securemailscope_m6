@@ -1,4 +1,25 @@
-const API_BASE_URL = "";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+async function parseResponse(response) {
+  const text = await response.text();
+
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { message: text };
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data?.detail ||
+        data?.message ||
+        `Request failed with status ${response.status}`
+    );
+  }
+
+  return data;
+}
 
 export async function analyzePcap(file) {
   const formData = new FormData();
@@ -9,12 +30,7 @@ export async function analyzePcap(file) {
     body: formData,
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || `Upload failed: ${response.status}`);
-  }
-
-  return response.json();
+  return parseResponse(response);
 }
 
 export async function uploadPcap(file) {
@@ -22,27 +38,13 @@ export async function uploadPcap(file) {
 }
 
 export async function getResults(analysisId) {
-  const response = await fetch(
-    `${API_BASE_URL}/results/${analysisId}`
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to get results: ${response.status}`);
-  }
-
-  return response.json();
+  const response = await fetch(`${API_BASE_URL}/results/${analysisId}`);
+  return parseResponse(response);
 }
 
 export async function getReportJson(analysisId) {
-  const response = await fetch(
-    `${API_BASE_URL}/report/${analysisId}/json`
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to get report: ${response.status}`);
-  }
-
-  return response.json();
+  const response = await fetch(`${API_BASE_URL}/report/${analysisId}/json`);
+  return parseResponse(response);
 }
 
 export function getReportHtmlUrl(analysisId) {
@@ -51,10 +53,5 @@ export function getReportHtmlUrl(analysisId) {
 
 export async function checkHealth() {
   const response = await fetch(`${API_BASE_URL}/health`);
-
-  if (!response.ok) {
-    throw new Error("Backend is not healthy");
-  }
-
-  return response.json();
+  return parseResponse(response);
 }
