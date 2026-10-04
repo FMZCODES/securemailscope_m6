@@ -1,17 +1,17 @@
-export default function SecurityScore({ score }) {
+export default function SecurityScore({ score, riskScore, streams }) {
   return (
     <div className="card score-card">
-      <p className="label">
-        Security posture score
-      </p>
+      <p className="label">Security posture score</p>
 
       <div className="score">
-        {score}
+        {score === null || score === undefined ? "—" : score}
         <span>/100</span>
       </div>
 
       <p className="muted">
-        Final scoring can be supplied by the M5 risk engine.
+        {riskScore === null || riskScore === undefined
+          ? "M5 risk data is not available in this response."
+          : `Overall risk: ${riskScore}/100 across ${streams} stream(s).`}
       </p>
     </div>
   );
